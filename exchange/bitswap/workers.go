@@ -6,6 +6,7 @@ import (
 
 	process "gx/ipfs/QmQopLATEYMNg7dVqZRNDfeE2S1yKy8zrRh5xnYiuqeZBn/goprocess"
 	procctx "gx/ipfs/QmQopLATEYMNg7dVqZRNDfeE2S1yKy8zrRh5xnYiuqeZBn/goprocess/context"
+	lru "gx/ipfs/QmVYxfoJQiZijTgPNHCHgHELvQpbsJNTg6Crmc3dQkj3yy/golang-lru"
 	context "gx/ipfs/QmZy2y8t9zQH2a1b8q2ZSLKp17ATuJoCNxxyMFG5qFExpt/go-net/context"
 
 	key "github.com/ipfs/go-ipfs/blocks/key"
@@ -126,6 +127,9 @@ func (bs *Bitswap) provideCollector(ctx context.Context) {
 	var nextKey key.Key
 	var keysOut chan key.Key
 
+	provdCache, _ := lru.NewARC(128)
+	const cacheValidDuration = time.Minute * 5
+
 	for {
 		select {
 		case blk, ok := <-bs.newBlocks:
@@ -133,6 +137,14 @@ func (bs *Bitswap) provideCollector(ctx context.Context) {
 				log.Debug("newBlocks channel closed")
 				return
 			}
+
+			last, lastOk := provdCache.Get(blk.Key())
+			if lastOk && last.(time.Time).Add(cacheValidDuration).After(time.Now()) {
+				log.Debug("skipping provide for: ", blk.Key())
+				continue
+			}
+
+			provdCache.Add(blk.Key(), time.Now())
 			if keysOut == nil {
 				nextKey = blk.Key()
 				keysOut = bs.provideKeys
